@@ -258,9 +258,9 @@ def main():
         "files", nargs="*", default=[".*"], help="files to be processed (regex on path)"
     )
     parser.add_argument(
-        "excluded-files",
-        nargs="*",
-        default=[],
+        "-excluded-file-patterns",
+        type=str,
+        default=None,
         help="files to be excluded (regex on path)",
     )
     parser.add_argument("-fix", action="store_true", help="apply fix-its")
@@ -335,7 +335,11 @@ def main():
 
     # Build up a big regexy filter from all command line arguments.
     file_name_re = re.compile("|".join(args.files))
-    excluded_file_name_re = re.compile("|".join(args.excluded_files))
+    excluded_file_name_re = None
+    if args.excluded_file_patterns is not None:
+        excluded_file_name_re = re.compile(
+            "|".join(" ".split(args.excluded_file_patterns))
+        )
 
     return_code = 0
     try:
@@ -354,8 +358,11 @@ def main():
 
         # Fill the queue with files.
         for name in files:
-            if file_name_re.search(name) and not excluded_file_name_re.search(name):
-                task_queue.put(name)
+            if not file_name_re.search(name):
+                continue
+            if excluded_file_name_re is not None and excluded_file_name_re.search(name):
+                continue
+            task_queue.put(name)
 
         # Wait for all threads to be done.
         task_queue.join()
