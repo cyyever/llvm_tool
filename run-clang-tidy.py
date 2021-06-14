@@ -338,7 +338,7 @@ def main():
     excluded_file_name_re = None
     if args.excluded_file_patterns is not None:
         excluded_file_name_re = re.compile(
-            "|".join(" ".split(args.excluded_file_patterns))
+            "|".join(args.excluded_file_patterns.split(" "))
         )
 
     return_code = 0
