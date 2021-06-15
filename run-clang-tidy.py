@@ -322,7 +322,7 @@ def main():
 
     # Load the database and extract all files.
     database = json.load(open(os.path.join(build_path, db_path)))
-    files = [make_absolute(entry["file"], entry["directory"]) for entry in database]
+    files = {make_absolute(entry["file"], entry["directory"]) for entry in database}
 
     max_task = args.j
     if max_task == 0:
@@ -337,9 +337,7 @@ def main():
     file_name_re = re.compile("|".join(args.files))
     excluded_file_name_re = None
     if args.excluded_file_patterns is not None:
-        excluded_file_name_re = re.compile(
-            "|".join(args.excluded_file_patterns.split(" "))
-        )
+        excluded_file_name_re = re.compile(args.excluded_file_patterns)
 
     return_code = 0
     try:
