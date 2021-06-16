@@ -355,11 +355,12 @@ def main():
             t.start()
 
         # Fill the queue with files.
+        files = {name for name in files if file_name_re.search(name)}
+        if excluded_file_name_re is not None:
+            files = {name for name in files if not excluded_file_name_re.search(name)}
+
+        print("Will check", len(files), "files")
         for name in files:
-            if not file_name_re.search(name):
-                continue
-            if excluded_file_name_re is not None and excluded_file_name_re.search(name):
-                continue
             task_queue.put(name)
 
         # Wait for all threads to be done.
