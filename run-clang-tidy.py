@@ -42,7 +42,6 @@ import multiprocessing
 import os
 import queue
 import re
-import shutil
 import subprocess
 import sys
 import threading
@@ -265,8 +264,6 @@ def main():
     if max_task == 0:
         max_task = multiprocessing.cpu_count()
 
-    tmpdir = None
-
     # Build up a big regexy filter from all command line arguments.
     file_name_re = re.compile("|".join(args.files))
     excluded_file_name_re = None
@@ -306,12 +303,8 @@ def main():
         # This is a sad hack. Unfortunately subprocess goes
         # bonkers with ctrl-c and we start forking merrily.
         print("\nCtrl-C detected, goodbye.")
-        if tmpdir:
-            shutil.rmtree(tmpdir)
         os.kill(0, 9)
 
-    if tmpdir:
-        shutil.rmtree(tmpdir)
     sys.exit(return_code)
 
 
