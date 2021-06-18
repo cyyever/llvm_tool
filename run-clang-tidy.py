@@ -15,7 +15,7 @@ Parallel clang-tidy runner
 ==========================
 
 Runs clang-tidy over all files in a compilation database. Requires clang-tidy
-and clang-apply-replacements in $PATH.
+ in $PATH.
 
 Example invocations.
 - Run clang-tidy on all files in the current working directory with a default
@@ -37,7 +37,6 @@ http://clang.llvm.org/docs/HowToSetupToolingForLLVM.html
 from __future__ import print_function
 
 import argparse
-import glob
 import json
 import multiprocessing
 import os
@@ -46,11 +45,7 @@ import re
 import shutil
 import subprocess
 import sys
-import tempfile
 import threading
-import traceback
-
-import yaml
 
 
 def find_compilation_database(path):
@@ -74,7 +69,7 @@ def get_tidy_invocation(
     f,
     clang_tidy_binary,
     checks,
-    tmpdir,
+    fix,
     build_path,
     header_filter,
     allow_enabling_alpha_checkers,
@@ -92,13 +87,8 @@ def get_tidy_invocation(
         start.append("-header-filter=" + header_filter)
     if checks:
         start.append("-checks=" + checks)
-    if tmpdir is not None:
-        start.append("-export-fixes")
-        # Get a temporary file. We immediately close the handle so clang-tidy can
-        # overwrite it.
-        (handle, name) = tempfile.mkstemp(suffix=".yaml", dir=tmpdir)
-        os.close(handle)
-        start.append(name)
+    if fix:
+        start.append("-fix")
     for arg in extra_arg:
         start.append("-extra-arg=%s" % arg)
     for arg in extra_arg_before:
@@ -114,57 +104,7 @@ def get_tidy_invocation(
     return start
 
 
-def merge_replacement_files(tmpdir, mergefile):
-    """Merge all replacement files in a directory into a single file"""
-    # The fixes suggested by clang-tidy >= 4.0.0 are given under
-    # the top level key 'Diagnostics' in the output yaml files
-    mergekey = "Diagnostics"
-    merged = []
-    for replacefile in glob.iglob(os.path.join(tmpdir, "*.yaml")):
-        content = yaml.safe_load(open(replacefile, "r"))
-        if not content:
-            continue  # Skip empty files.
-        merged.extend(content.get(mergekey, []))
-
-    if merged:
-        # MainSourceFile: The key is required by the definition inside
-        # include/clang/Tooling/ReplacementsYaml.h, but the value
-        # is actually never used inside clang-apply-replacements,
-        # so we set it to '' here.
-        output = {"MainSourceFile": "", mergekey: merged}
-        with open(mergefile, "w") as out:
-            yaml.safe_dump(output, out)
-    else:
-        # Empty the file:
-        open(mergefile, "w").close()
-
-
-def check_clang_apply_replacements_binary(args):
-    """Checks if invoking supplied clang-apply-replacements binary works."""
-    try:
-        subprocess.check_call([args.clang_apply_replacements_binary, "--version"])
-    except BaseException:
-        print(
-            "Unable to run clang-apply-replacements. Is clang-apply-replacements "
-            "binary correctly specified?",
-            file=sys.stderr,
-        )
-        traceback.print_exc()
-        sys.exit(1)
-
-
-def apply_fixes(args, tmpdir):
-    """Calls clang-apply-fixes on a given directory."""
-    invocation = [args.clang_apply_replacements_binary]
-    if args.format:
-        invocation.append("-format")
-    if args.style:
-        invocation.append("-style=" + args.style)
-    invocation.append(tmpdir)
-    subprocess.call(invocation)
-
-
-def run_tidy(args, tmpdir, build_path, queue, lock, failed_files):
+def run_tidy(args, build_path, queue, lock, failed_files):
     """Takes filenames out of queue and runs clang-tidy on them."""
     while True:
         name = queue.get()
@@ -172,7 +112,7 @@ def run_tidy(args, tmpdir, build_path, queue, lock, failed_files):
             name,
             args.clang_tidy_binary,
             args.checks,
-            tmpdir,
+            args.fix,
             build_path,
             args.header_filter,
             args.allow_enabling_alpha_checkers,
@@ -201,7 +141,7 @@ def main():
     parser = argparse.ArgumentParser(
         description="Runs clang-tidy over all files "
         "in a compilation database. Requires "
-        "clang-tidy and clang-apply-replacements in "
+        "clang-tidy in "
         "$PATH."
     )
     parser.add_argument(
@@ -214,12 +154,6 @@ def main():
         metavar="PATH",
         default="clang-tidy",
         help="path to clang-tidy binary",
-    )
-    parser.add_argument(
-        "-clang-apply-replacements-binary",
-        metavar="PATH",
-        default="clang-apply-replacements",
-        help="path to clang-apply-replacements binary",
     )
     parser.add_argument(
         "-checks",
@@ -250,13 +184,6 @@ def main():
         "headers to output diagnostics from. Diagnostics from "
         "the main file of each translation unit are always "
         "displayed.",
-    )
-    parser.add_argument(
-        "-export-fixes",
-        metavar="filename",
-        dest="export_fixes",
-        help="Create a yaml file to store suggested fixes in, "
-        "which can be applied with clang-apply-replacements.",
     )
     parser.add_argument(
         "-j",
@@ -339,9 +266,6 @@ def main():
         max_task = multiprocessing.cpu_count()
 
     tmpdir = None
-    if args.fix or (yaml and args.export_fixes):
-        check_clang_apply_replacements_binary(args)
-        tmpdir = tempfile.mkdtemp()
 
     # Build up a big regexy filter from all command line arguments.
     file_name_re = re.compile("|".join(args.files))
@@ -359,7 +283,7 @@ def main():
         for _ in range(max_task):
             t = threading.Thread(
                 target=run_tidy,
-                args=(args, tmpdir, build_path, task_queue, lock, failed_files),
+                args=(args, build_path, task_queue, lock, failed_files),
             )
             t.daemon = True
             t.start()
@@ -385,24 +309,6 @@ def main():
         if tmpdir:
             shutil.rmtree(tmpdir)
         os.kill(0, 9)
-
-    if yaml and args.export_fixes:
-        print("Writing fixes to " + args.export_fixes + " ...")
-        try:
-            merge_replacement_files(tmpdir, args.export_fixes)
-        except BaseException:
-            print("Error exporting fixes.\n", file=sys.stderr)
-            traceback.print_exc()
-            return_code = 1
-
-    if args.fix:
-        print("Applying fixes ...")
-        try:
-            apply_fixes(args, tmpdir)
-        except BaseException:
-            print("Error applying fixes.\n", file=sys.stderr)
-            traceback.print_exc()
-            return_code = 1
 
     if tmpdir:
         shutil.rmtree(tmpdir)
