@@ -77,6 +77,7 @@ def get_tidy_invocation(
     quiet,
     config,
     config_file,
+    format_style,
 ):
     """Gets a command line for clang-tidy."""
     start = [clang_tidy_binary]
@@ -99,6 +100,8 @@ def get_tidy_invocation(
         start.append("-config=" + config)
     if config_file:
         start.append("-config-file=" + config_file)
+    if format_style:
+        start.append("-format-style=" + format_style)
     start.append(f)
     return start
 
@@ -120,6 +123,7 @@ def run_tidy(args, build_path, queue, lock, failed_files):
             args.quiet,
             args.config,
             args.config_file,
+            args.format_style,
         )
 
         with subprocess.Popen(
@@ -175,6 +179,11 @@ def main():
         default=None,
         help="Specify the path of .clang-tidy or custom config file"
         "Use either --config-file or --config, not both.",
+    )
+    parser.add_argument(
+        "-format-style",
+        default=None,
+        help="Style for formatting code around applied fixes",
     )
     parser.add_argument(
         "-header-filter",
