@@ -106,7 +106,7 @@ def get_tidy_invocation(
     return start
 
 
-def run_tidy(args, build_path, queue, lock, failed_files):
+def run_tidy(args, build_path, queue, lock, failed_files, timeout):
     """Takes filenames out of queue and runs clang-tidy on them."""
     while True:
         name = queue.get()
@@ -129,7 +129,12 @@ def run_tidy(args, build_path, queue, lock, failed_files):
         with subprocess.Popen(
             invocation, stdout=subprocess.PIPE, stderr=subprocess.PIPE
         ) as proc:
-            output, err = proc.communicate()
+            try:
+                output, err = proc.communicate(timeout=timeout)
+            except subprocess.TimeoutExpired:
+                sys.stderr.write("timeout and kill clang-tidy")
+                proc.kill()
+                output, err = proc.communicate()
             if proc.returncode != 0:
                 failed_files.append(name)
             with lock:
@@ -207,6 +212,12 @@ def main():
         type=str,
         default=None,
         help="files to be excluded (regex on path)",
+    )
+    parser.add_argument(
+        "-timeout",
+        type=int,
+        default=None,
+        help="max time to run clang-tidy",
     )
     parser.add_argument("-fix", action="store_true", help="apply fix-its")
     parser.add_argument(
@@ -289,7 +300,7 @@ def main():
         for _ in range(max_task):
             t = threading.Thread(
                 target=run_tidy,
-                args=(args, build_path, task_queue, lock, failed_files),
+                args=(args, build_path, task_queue, lock, failed_files, args.timeout),
             )
             t.daemon = True
             t.start()
