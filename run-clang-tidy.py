@@ -295,6 +295,8 @@ def main():
             t.start()
 
         # Fill the queue with files.
+        files = {name for name in files if not name.endswith(".cu")}
+        files = {name for name in files if not name.endswith(".cuh")}
         files = {name for name in files if file_name_re.search(name)}
         if excluded_file_name_re is not None:
             files = {name for name in files if not excluded_file_name_re.search(name)}
